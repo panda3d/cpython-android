@@ -570,7 +570,7 @@ def parse_args():
     for subcommand in build, configure_host, make_host:
         subcommand.add_argument(
             "host", metavar="HOST",
-            choices=["aarch64-linux-android", "x86_64-linux-android"],
+            choices=["aarch64-linux-android", "x86_64-linux-android", "arm-linux-androideabi", "i686-linux-android"],
             help="Host triplet: choices=[%(choices)s]")
     for subcommand in build, configure_build, configure_host:
         subcommand.add_argument("args", nargs="*",
