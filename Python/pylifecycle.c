@@ -60,6 +60,10 @@
 #  include <fcntl.h>              // F_GETFD
 #endif
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+#endif
+
 #ifdef MS_WINDOWS
 #  undef BYTE
 #endif
@@ -269,12 +273,21 @@ _coerce_default_locale_settings(int warn, const _LocaleCoercionTarget *target)
 
     /* Set the relevant locale environment variable */
     if (setenv("LC_CTYPE", newloc, 1)) {
+#ifdef __ANDROID__
+        __android_log_write(ANDROID_LOG_ERROR, "python.stderr",
+                            "Error setting LC_CTYPE, skipping C locale coercion");
+#else
         fprintf(stderr,
                 "Error setting LC_CTYPE, skipping C locale coercion\n");
+#endif
         return 0;
     }
     if (warn) {
+#ifdef __ANDROID__
+        __android_log_print(ANDROID_LOG_WARN, "python.stderr", C_LOCALE_COERCION_WARNING, newloc);
+#else
         fprintf(stderr, C_LOCALE_COERCION_WARNING, newloc);
+#endif
     }
 
     /* Reconfigure with the overridden environment variables */
@@ -378,8 +391,13 @@ _Py_SetLocaleFromEnv(int category)
          * extension modules), so we make sure that they match the locale
          * configuration */
         if (setenv("LC_CTYPE", utf8_locale, 1)) {
+#ifdef __ANDROID__
+            __android_log_print(ANDROID_LOG_WARN, "python.stderr",
+                                "Warning: failed setting the LC_CTYPE environment variable to %s", utf8_locale);
+#else
             fprintf(stderr, "Warning: failed setting the LC_CTYPE "
                             "environment variable to %s\n", utf8_locale);
+#endif
         }
     }
 #endif
@@ -1149,12 +1167,22 @@ run_presite(PyThreadState *tstate)
         wcslen(config->run_presite)
     );
     if (presite_modname == NULL) {
+#ifdef __ANDROID__
+        __android_log_write(ANDROID_LOG_ERROR, "python.stderr",
+                            "Could not convert pre-site module name to unicode");
+#else
         fprintf(stderr, "Could not convert pre-site module name to unicode\n");
+#endif
     }
     else {
         PyObject *presite = PyImport_Import(presite_modname);
         if (presite == NULL) {
+#ifdef __ANDROID__
+            __android_log_write(ANDROID_LOG_ERROR, "python.stderr",
+                                "pre-site import failed:");
+#else
             fprintf(stderr, "pre-site import failed:\n");
+#endif
             _PyErr_Print(tstate);
         }
         Py_XDECREF(presite);
@@ -1283,7 +1311,11 @@ init_interp_main(PyThreadState *tstate)
         {
             PyObject *warnings_module = PyImport_ImportModule("warnings");
             if (warnings_module == NULL) {
+#ifdef __ANDROID__
+                __android_log_write(ANDROID_LOG_ERROR, "Python", "'import warnings' failed; traceback:");
+#else
                 fprintf(stderr, "'import warnings' failed; traceback:\n");
+#endif
                 _PyErr_Print(tstate);
             }
             Py_XDECREF(warnings_module);
@@ -2158,7 +2190,12 @@ _Py_Finalize(_PyRuntimeState *runtime)
     if (dump_refs_file != NULL) {
         dump_refs_fp = _Py_wfopen(dump_refs_file, L"w");
         if (dump_refs_fp == NULL) {
+#ifdef __ANDROID__
+            __android_log_write(ANDROID_LOG_ERROR, "python.stderr",
+                                "PYTHONDUMPREFSFILE: cannot create file: %ls", dump_refs_file);
+#else
             fprintf(stderr, "PYTHONDUMPREFSFILE: cannot create file: %ls\n", dump_refs_file);
+#endif
         }
     }
 
@@ -3007,6 +3044,9 @@ static void
 _Py_FatalError_DumpTracebacks(int fd, PyInterpreterState *interp,
                               PyThreadState *tstate)
 {
+#ifdef __ANDROID__
+    if (fd != 1 && fd != 2)
+#endif
     PUTS(fd, "\n");
 
     /* display the current Python stack */
@@ -3094,8 +3134,28 @@ fatal_output_debug(const char *msg)
 static void
 fatal_error_dump_runtime(int fd, _PyRuntimeState *runtime)
 {
-    PUTS(fd, "Python runtime state: ");
     PyThreadState *finalizing = _PyRuntimeState_GetFinalizing(runtime);
+#ifdef __ANDROID__
+    if (finalizing) {
+        __android_log_print(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: finalizing (tstate=%p)", finalizing);
+    }
+    else if (runtime->initialized) {
+        __android_log_write(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: initialized");
+    }
+    else if (runtime->core_initialized) {
+        __android_log_write(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: core initialized");
+    }
+    else if (runtime->preinitialized) {
+        __android_log_write(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: preinitialized");
+    }
+    else if (runtime->preinitializing) {
+        __android_log_write(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: preinitializing");
+    }
+    else {
+        __android_log_write(ANDROID_LOG_FATAL, "python.stderr", "Python runtime state: unknown");
+    }
+#else
+    PUTS(fd, "Python runtime state: ");
     if (finalizing) {
         PUTS(fd, "finalizing (tstate=0x");
         _Py_DumpHexadecimal(fd, (uintptr_t)finalizing, sizeof(finalizing) * 2);
@@ -3117,6 +3177,7 @@ fatal_error_dump_runtime(int fd, _PyRuntimeState *runtime)
         PUTS(fd, "unknown");
     }
     PUTS(fd, "\n");
+#endif
 }
 
 
@@ -3278,6 +3339,12 @@ fatal_error(int fd, int header, const char *prefix, const char *msg,
     reentrant = 1;
 
     if (header) {
+#ifdef __ANDROID__
+        if (prefix)
+            __android_log_print(ANDROID_LOG_FATAL, "python.stderr", "Fatal Python error: %s: %s", prefix, msg ? msg : "<message not set>");
+        else
+            __android_log_print(ANDROID_LOG_FATAL, "python.stderr", "Fatal Python error: %s", msg ? msg : "<message not set>");
+#else
         PUTS(fd, "Fatal Python error: ");
         if (prefix) {
             PUTS(fd, prefix);
@@ -3290,6 +3357,7 @@ fatal_error(int fd, int header, const char *prefix, const char *msg,
             PUTS(fd, "<message not set>");
         }
         PUTS(fd, "\n");
+#endif
     }
 
     _PyRuntimeState *runtime = &_PyRuntime;
@@ -3373,6 +3441,14 @@ _Py_FatalErrorFormat(const char *func, const char *format, ...)
     }
     reentrant = 1;
 
+#ifdef __ANDROID__
+    va_list vargs;
+    va_start(vargs, format);
+    __android_log_vprint(ANDROID_LOG_FATAL, "python.stderr", format, vargs);
+    va_end(vargs);
+
+    fatal_error(fileno(stderr), 0, NULL, NULL, -1);
+#else
     FILE *stream = stderr;
     const int fd = fileno(stream);
     PUTS(fd, "Fatal Python error: ");
@@ -3390,6 +3466,7 @@ _Py_FatalErrorFormat(const char *func, const char *format, ...)
     fflush(stream);
 
     fatal_error(fd, 0, NULL, NULL, -1);
+#endif
 }
 
 

@@ -22,6 +22,12 @@
 #  include <unistd.h>             // lseek()
 #endif
 
+#ifdef __ANDROID__
+#  include <android/log.h>
+
+#define ANDROID_PRINT(fd, ...) __android_log_print(2 + fd * 2, fd == 2 ? "python.stderr" : "python.stdout", __VA_ARGS__)
+#endif
+
 
 #define OFF(x) offsetof(PyTracebackObject, x)
 #define PUTS(fd, str) (void)_Py_write_noraise(fd, str, (int)strlen(str))
@@ -893,6 +899,31 @@ dump_frame(int fd, _PyInterpreterFrame *frame)
     assert(frame->owner != FRAME_OWNED_BY_CSTACK);
 
     PyCodeObject *code =_PyFrame_GetCode(frame);
+    int lineno = PyUnstable_InterpreterFrame_GetLine(frame);
+
+#ifdef __ANDROID__
+    if (fd == 1 || fd == 2) {
+        const char *name = "???";
+        if (code != NULL && code->co_name != NULL
+            && PyUnicode_Check(code->co_name)) {
+            name = PyUnicode_AsUTF8(code->co_name);
+        }
+
+        if (code != NULL && code->co_filename != NULL
+            && PyUnicode_Check(code->co_filename)) {
+            const char *fn = PyUnicode_AsUTF8(code->co_filename);
+            if (lineno >= 0)
+                ANDROID_PRINT(fd, "File \"%s\", line %lu, in %s", fn, (unsigned long)lineno, name);
+            else
+                ANDROID_PRINT(fd, "File \"%s\", line ???, in %s", fn, name);
+        } else if (lineno >= 0)
+            ANDROID_PRINT(fd, "File ???, line %lu, in %s", (unsigned long)lineno, name);
+        else
+            ANDROID_PRINT(fd, "File ???, line ???, in %s", name);
+        return;
+    }
+#endif
+
     PUTS(fd, "  File ");
     if (code->co_filename != NULL
         && PyUnicode_Check(code->co_filename))
@@ -904,7 +935,6 @@ dump_frame(int fd, _PyInterpreterFrame *frame)
         PUTS(fd, "???");
     }
 
-    int lineno = PyUnstable_InterpreterFrame_GetLine(frame);
     PUTS(fd, ", line ");
     if (lineno >= 0) {
         _Py_DumpDecimal(fd, (size_t)lineno);
@@ -949,16 +979,31 @@ static void
 dump_traceback(int fd, PyThreadState *tstate, int write_header)
 {
     if (write_header) {
+#ifdef __ANDROID__
+        if (fd == 1 || fd == 2)
+            ANDROID_PRINT(fd, "Stack (most recent call first):");
+        else
+#endif
         PUTS(fd, "Stack (most recent call first):\n");
     }
 
     if (tstate_is_freed(tstate)) {
+#ifdef __ANDROID__
+        if (fd == 1 || fd == 2)
+            ANDROID_PRINT(fd, "  <tstate is freed>");
+        else
+#endif
         PUTS(fd, "  <tstate is freed>\n");
         return;
     }
 
     _PyInterpreterFrame *frame = tstate->current_frame;
     if (frame == NULL) {
+#ifdef __ANDROID__
+        if (fd == 1 || fd == 2)
+            ANDROID_PRINT(fd, "  <no Python frame>");
+        else
+#endif
         PUTS(fd, "  <no Python frame>\n");
         return;
     }
@@ -978,9 +1023,16 @@ dump_traceback(int fd, PyThreadState *tstate, int write_header)
 
         if (MAX_FRAME_DEPTH <= depth) {
             if (MAX_FRAME_DEPTH < depth) {
-                PUTS(fd, "plus ");
-                _Py_DumpDecimal(fd, depth);
-                PUTS(fd, " frames\n");
+#ifdef __ANDROID__
+                if (fd == 1 || fd == 2)
+                    ANDROID_PRINT(fd, "plus %u frames", depth);
+                else
+#endif
+                {
+                    PUTS(fd, "plus ");
+                    _Py_DumpDecimal(fd, depth);
+                    PUTS(fd, " frames\n");
+                }
             }
             break;
         }
@@ -1014,6 +1066,15 @@ _Py_DumpTraceback(int fd, PyThreadState *tstate)
 static void
 write_thread_id(int fd, PyThreadState *tstate, int is_current)
 {
+#ifdef __ANDROID__
+    if (fd == 1 || fd == 2) {
+        if (is_current)
+            ANDROID_PRINT(fd, "Current thread 0x%08lx (most recent call first):", tstate->thread_id);
+        else
+            ANDROID_PRINT(fd, "Thread 0x%08lx (most recent call first):", tstate->thread_id);
+        return;
+    }
+#endif
     if (is_current)
         PUTS(fd, "Current thread 0x");
     else
@@ -1082,14 +1143,30 @@ _Py_DumpTracebackThreads(int fd, PyInterpreterState *interp,
     _Py_BEGIN_SUPPRESS_IPH
     do
     {
-        if (nthreads != 0)
+        if (nthreads != 0) {
+#ifdef __ANDROID__
+            if (fd == 1 || fd == 2)
+                ANDROID_PRINT(fd, "");
+            else
+#endif
             PUTS(fd, "\n");
+        }
         if (nthreads >= MAX_NTHREADS) {
+#ifdef __ANDROID__
+            if (fd == 1 || fd == 2)
+                ANDROID_PRINT(fd, "...");
+            else
+#endif
             PUTS(fd, "...\n");
             break;
         }
         write_thread_id(fd, tstate, tstate == current_tstate);
         if (tstate == current_tstate && tstate->interp->gc.collecting) {
+#ifdef __ANDROID__
+            if (fd == 1 || fd == 2)
+                ANDROID_PRINT(fd, "  Garbage-collecting");
+            else
+#endif
             PUTS(fd, "  Garbage-collecting\n");
         }
         dump_traceback(fd, tstate, 0);
